@@ -1,0 +1,22 @@
+{
+  "name": "youtube-to-blog",
+  "version": "1.0.0",
+  "description": "유튜브 링크를 블로그 게시글로 변환하는 웹 앱 (Express + Claude)",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=20.12"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.7.0",
+    "@google/genai": "^3.0.0",
+    "dompurify": "^3.4.17",
+    "express": "^5.3.0",
+    "marked": "^18.2.0"
+  }
+}

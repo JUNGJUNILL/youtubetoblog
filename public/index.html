@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>유튜브 → 블로그 글 변환기</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css"
+    />
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="hero">
+        <div class="badge"><span class="yt">▶</span> YouTube → Blog</div>
+        <h1>유튜브 영상을 블로그 글로</h1>
+        <p>링크만 넣으면, 복사해서 바로 올릴 수 있는 블로그 게시글로 바꿔드려요.</p>
+      </header>
+
+      <form id="form" class="card form" autocomplete="off">
+        <div class="input-row">
+          <input
+            id="url"
+            type="text"
+            inputmode="url"
+            placeholder="유튜브 링크를 붙여넣으세요"
+            required
+          />
+          <button id="submit" type="submit" class="btn primary">전송</button>
+        </div>
+        <div class="options">
+          <label class="select">
+            <span>문체</span>
+            <select id="tone">
+              <option value="friendly">친근한 해요체</option>
+              <option value="formal">정중한 합니다체</option>
+            </select>
+          </label>
+          <label class="select">
+            <span>분량</span>
+            <select id="length">
+              <option value="detailed">자세히 (내용 빠짐없이)</option>
+              <option value="brief">핵심만</option>
+            </select>
+          </label>
+          <label class="check">
+            <input id="scenes" type="checkbox" checked />
+            <span>영상 장면 이미지 넣기</span>
+          </label>
+          <span class="hint">자막(자동 생성 자막 포함)이 있는 영상만 변환할 수 있어요.</span>
+        </div>
+      </form>
+
+      <section id="status" class="status" hidden>
+        <div class="spinner" aria-hidden="true"></div>
+        <span id="status-text"></span>
+        <span id="status-timer" class="timer"></span>
+        <button id="cancel" type="button" class="btn ghost small">취소</button>
+      </section>
+
+      <section id="error" class="alert error" role="alert" hidden></section>
+
+      <section id="video" class="card video" hidden>
+        <img id="video-thumb" alt="" />
+        <div class="video-info">
+          <a id="video-title" class="video-title" target="_blank" rel="noopener noreferrer"></a>
+          <div id="video-meta" class="video-meta"></div>
+        </div>
+      </section>
+
+      <section id="result" class="card result" hidden>
+        <div class="toolbar">
+          <div class="tabs" role="tablist">
+            <button type="button" class="tab active" data-view="preview">미리보기</button>
+            <button type="button" class="tab" data-view="markdown">마크다운</button>
+          </div>
+          <div class="actions">
+            <button type="button" class="btn" id="copy-title" disabled>제목 복사</button>
+            <button type="button" class="btn primary" id="copy-rich" disabled title="네이버 블로그·티스토리 에디터에 붙여넣으면 서식이 유지돼요">본문 복사</button>
+            <button type="button" class="btn" id="copy-quill" disabled title="Quill 에디터에 붙여넣으면 제목·굵게·목록·인용·링크가 유지돼요 (표는 목록으로 바뀌어요)">Quill용 복사</button>
+            <button type="button" class="btn" id="copy-md" disabled>마크다운 복사</button>
+            <button type="button" class="btn" id="copy-html" disabled>HTML 복사</button>
+          </div>
+        </div>
+
+        <article id="preview" class="post"></article>
+        <pre id="markdown" class="markdown" hidden></pre>
+
+        <div class="result-footer">
+          <span id="char-count" class="muted"></span>
+          <button type="button" class="btn ghost small" id="regenerate" disabled>↻ 다시 생성</button>
+        </div>
+      </section>
+
+      <footer class="page-footer muted">
+        본문 복사 → 네이버 블로그·티스토리 에디터에 붙여넣기 · Quill용 복사 → Quill 에디터에 붙여넣기 · 마크다운 복사 → 마크다운 지원 블로그(velog, 티스토리 마크다운 모드 등)
+      </footer>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <script src="/vendor/marked.js"></script>
+    <script src="/vendor/purify.js"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>
