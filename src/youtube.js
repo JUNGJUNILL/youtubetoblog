@@ -202,8 +202,11 @@ export function formatTime(totalSeconds) {
   return h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
 }
 
-/** 자막 조각들을 약 30초 단위 문단으로 묶어 모델이 읽기 쉬운 텍스트로 만듭니다. */
-function segmentsToText(segments, chunkSeconds = 30) {
+/**
+ * 자막 조각들을 약 15초 단위 문단으로 묶어 모델이 읽기 쉬운 텍스트로 만듭니다.
+ * (시각 표시가 촘촘할수록 AI가 장면 구간을 더 정확하게 적을 수 있음)
+ */
+function segmentsToText(segments, chunkSeconds = 15) {
   const lines = [];
   let chunkStart = null;
   let buf = [];
@@ -221,6 +224,14 @@ function segmentsToText(segments, chunkSeconds = 30) {
   return lines.join("\n");
 }
 
+/** 각 자막 조각에 끝 시각을 붙입니다. (다음 조각의 시작, 최대 10초) */
+function withEnds(segments, duration) {
+  return segments.map((seg, i) => {
+    const next = segments[i + 1]?.start ?? (duration || seg.start + 10);
+    return { start: seg.start, end: Math.max(seg.start + 0.5, Math.min(next, seg.start + 10)), text: seg.text };
+  });
+}
+
 async function fetchOEmbed(videoId) {
   try {
     const res = await fetchWithTimeout(
@@ -234,7 +245,8 @@ async function fetchOEmbed(videoId) {
 
 /**
  * 영상 정보 + 자막을 가져옵니다.
- * @returns {{ video: object, transcript: string }}
+ * @returns {{ video: object, transcript: string, segments: { start: number, end: number, text: string }[] }}
+ *   segments: 시각이 붙은 자막 조각 (장면을 고를 때 "그 순간 화자가 하는 말"을 찾는 데 사용)
  */
 export async function getVideoContent(videoId) {
   let page = { apiKey: null, pagePlayer: null };
@@ -294,6 +306,7 @@ export async function getVideoContent(videoId) {
           transcriptAuto: track.kind === "asr",
         },
         transcript: segmentsToText(segments),
+        segments: withEnds(segments, video.lengthSeconds),
       };
     }
   }

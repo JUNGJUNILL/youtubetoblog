@@ -119,15 +119,16 @@ export async function generate({ system, user, onText, signal }) {
 
 /**
  * 후보 이미지들을 보고 장면별로 하나씩 고릅니다. (요청 한 번)
- * @param {{ instructions: string, schema: object, scenes: { text: string, images: string[] }[], signal?: AbortSignal }} args
- * @returns {Promise<{ scenes: { scene: number, pick: number, relevant: boolean, caption: string }[] }>}
+ * @param {{ instructions: string, schema: object, scenes: { text: string, images: { data: string, note?: string }[] }[], signal?: AbortSignal }} args
+ *   images: 후보 이미지(base64 JPEG)와 설명 (영상 속 시각, 그 순간의 자막)
+ * @returns {Promise<{ scenes: { scene: number, reason: string, pick: number, backup: number, relevant: boolean, caption: string }[] }>}
  */
 export async function chooseScenes({ instructions, schema, scenes, signal }) {
   const parts = [{ text: instructions }];
   scenes.forEach((sc, i) => {
     parts.push({ text: `\n[장면 ${i + 1}]\n${sc.text}` });
-    sc.images.forEach((data, j) => {
-      parts.push({ text: `장면 ${i + 1} - 후보 ${j + 1}` });
+    sc.images.forEach(({ data, note }, j) => {
+      parts.push({ text: `장면 ${i + 1} - 후보 ${j + 1}${note ? ` (${note})` : ""}` });
       parts.push(createPartFromBase64(data, "image/jpeg"));
     });
   });

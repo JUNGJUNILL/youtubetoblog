@@ -206,3 +206,28 @@ export async function getThumb(videoId, seconds) {
   }
   return thumb;
 }
+
+/**
+ * 거의 한 가지 색뿐인 화면(검은 화면, 페이드 중간, 빈 전환 화면)인지 확인합니다.
+ * ffmpeg signalstats 로 밝기 최솟값·최댓값을 재서, 밝기 차이가 거의 없거나 전체가 아주 어두우면 "빈 화면"
+ * (글자가 적은 흰 슬라이드도 글자 부분 때문에 밝기 차이가 커서 빈 화면으로 보지 않음)
+ */
+const blankCache = new Map(); // 썸네일 경로 → Promise<boolean>
+export function isBlankFrame(thumbFile) {
+  if (!blankCache.has(thumbFile)) {
+    const job = run(
+      tools.ffmpeg,
+      ["-hide_banner", "-loglevel", "error", "-i", thumbFile, "-vf", "signalstats,metadata=mode=print:file=-", "-f", "null", "-"],
+      { timeout: 15000 },
+    )
+      .then(({ stdout }) => {
+        const stat = (k) => Number(stdout.match(new RegExp(`signalstats\\.${k}=([\\d.]+)`))?.[1]);
+        const [min, max] = [stat("YMIN"), stat("YMAX")];
+        if (!Number.isFinite(min) || !Number.isFinite(max)) return false;
+        return max - min < 24 || max < 40;
+      })
+      .catch(() => false); // 판단할 수 없으면 정상 화면으로 봄
+    blankCache.set(thumbFile, job);
+  }
+  return blankCache.get(thumbFile);
+}

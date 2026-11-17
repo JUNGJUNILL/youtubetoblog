@@ -83,7 +83,7 @@ app.post("/api/generate", async (req, res) => {
   send({ type: "meta", appVersion: appVersion() });
   try {
     send({ type: "status", step: "transcript", message: "영상 정보와 자막을 가져오는 중..." });
-    const { video, transcript } = await getVideoContent(videoId);
+    const { video, transcript, segments } = await getVideoContent(videoId);
     if (abort.signal.aborted) return;
 
     const { description, ...publicVideo } = video;
@@ -116,13 +116,14 @@ app.post("/api/generate", async (req, res) => {
     });
     if (result.stopReason === "aborted") return;
 
-    // 글이 끝나면: 표시된 구간마다 후보 장면을 캡처하고, AI가 이미지를 보고 글 맥락에 맞는 장면을 고름
+    // 글이 끝나면: 표시된 구간에서 자막이 글과 맞는 순간 등 후보 장면을 캡처하고, AI가 이미지와 그 순간의 자막을 보고 글 맥락에 맞는 장면을 고름
     if (withScenes) {
       send({ type: "status", step: "scenes", message: "글 내용에 맞는 영상 장면을 고르는 중..." });
       const picks = await pickScenes({
         videoId,
         duration: video.lengthSeconds,
         markdown: fullText,
+        segments,
         chooser: chooseScenes,
         signal: abort.signal,
       });
