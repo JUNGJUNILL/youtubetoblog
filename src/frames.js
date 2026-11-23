@@ -14,6 +14,9 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const CACHE_DIR = path.join(ROOT, "cache", "frames");
 // 720p 이하 영상만 (mp4 우선: 원하는 시점으로 빠르게 건너뛰기 좋음)
 const FORMAT = "bv*[height<=720][ext=mp4]/bv*[height<=720]/b[height<=720]/b";
+// 화면 전환(컷) 감지용: 작은 화질이면 충분하고 빠름
+const ANALYSIS_FORMAT = "bv*[height<=360][ext=mp4]/bv*[height<=360]/b[height<=360]/wv*/w";
+const FORMATS = { capture: FORMAT, analysis: ANALYSIS_FORMAT };
 const STREAM_TTL_MS = 60 * 60 * 1000; // 스트림 주소는 몇 시간 뒤 만료되므로 1시간만 재사용
 const MAX_PARALLEL = 3; // 동시에 돌리는 ffmpeg 수
 
@@ -59,9 +62,9 @@ export function framesAvailable() {
 // ---------- 스트림 주소 (영상별 캐시) ----------
 const streams = new Map(); // videoId → { promise, expires }
 
-async function fetchStreamInfo(videoId) {
+async function fetchStreamInfo(videoId, format = FORMAT) {
   const url = `https://www.youtube.com/watch?v=${videoId}`;
-  const base = ["-j", "--no-playlist", "--no-warnings", "-f", FORMAT];
+  const base = ["-j", "--no-playlist", "--no-warnings", "-f", format];
   // 최신 yt-dlp 는 유튜브 해석에 JavaScript 실행기가 필요 → 지금 쓰는 Node.js 를 지정
   const jsRuntime = ["--js-runtimes", `node:${process.execPath}`];
   const opts = { timeout: 90000, maxBuffer: 64 * 1024 * 1024 };
@@ -90,19 +93,34 @@ async function fetchStreamInfo(videoId) {
   };
 }
 
-function getStreamInfo(videoId, { refresh = false } = {}) {
-  const cached = streams.get(videoId);
+/** kind: "capture"(장면 캡처, 720p) | "analysis"(화면 전환 감지, 360p) */
+function getStreamInfo(videoId, { refresh = false, kind = "capture" } = {}) {
+  const key = `${videoId}:${kind}`;
+  const cached = streams.get(key);
   if (!refresh && cached && cached.expires > Date.now()) return cached.promise;
-  const promise = fetchStreamInfo(videoId);
-  streams.set(videoId, { promise, expires: Date.now() + STREAM_TTL_MS });
-  promise.catch(() => streams.delete(videoId));
+  const promise = fetchStreamInfo(videoId, FORMATS[kind]);
+  streams.set(key, { promise, expires: Date.now() + STREAM_TTL_MS });
+  promise.catch(() => streams.delete(key));
   return promise;
 }
 
 /** 글 작성을 시작할 때 미리 스트림 주소를 받아 두면 첫 장면이 빨리 나옵니다. */
 export function prefetchStream(videoId) {
-  if (framesAvailable()) getStreamInfo(videoId).catch(() => {});
+  if (!framesAvailable()) return;
+  getStreamInfo(videoId).catch(() => {});
+  getStreamInfo(videoId, { kind: "analysis" }).catch(() => {});
 }
+
+/** 유튜브가 스트림 주소를 쓸 수 있게 해 줄 때까지 기다림 (받은 직후 몇 초는 403) */
+async function waitAvailable(availableAt) {
+  const waitMs = availableAt * 1000 - Date.now();
+  if (waitMs > 0) await new Promise((r) => setTimeout(r, Math.min(waitMs + 500, 60000)));
+}
+
+const headerArgs = (headers) => {
+  const text = Object.entries(headers ?? {}).map(([k, v]) => `${k}: ${v}\r\n`).join("");
+  return text ? ["-headers", text] : [];
+};
 
 // ---------- 동시 실행 제한 ----------
 let active = 0;
@@ -127,17 +145,15 @@ function limit(task) {
 async function capture(videoId, seconds, file) {
   const attempt = async (refresh) => {
     const { url, headers, duration, availableAt } = await getStreamInfo(videoId, { refresh });
-    const waitMs = availableAt * 1000 - Date.now();
-    if (waitMs > 0) await new Promise((r) => setTimeout(r, Math.min(waitMs + 500, 60000)));
+    await waitAvailable(availableAt);
     const t = duration ? Math.min(seconds, Math.max(0, Math.floor(duration) - 1)) : seconds;
-    const headerText = Object.entries(headers).map(([k, v]) => `${k}: ${v}\r\n`).join("");
     const tmp = `${file}.${process.pid}.${Date.now()}.tmp.webp`;
     try {
       await run(
         tools.ffmpeg,
         [
           "-hide_banner", "-loglevel", "error",
-          ...(headerText ? ["-headers", headerText] : []),
+          ...headerArgs(headers),
           "-ss", String(t),
           "-i", url,
           "-frames:v", "1",
@@ -230,4 +246,57 @@ export function isBlankFrame(thumbFile) {
     blankCache.set(thumbFile, job);
   }
   return blankCache.get(thumbFile);
+}
+
+// ---------- 화면 전환(컷) 감지 ----------
+const CUT_THRESHOLD = 0.27; // 앞 장면과 이만큼(0~1) 달라지면 새 장면으로 봄
+
+/**
+ * 영상 주소(또는 파일)의 [from, from+len] 구간에서 화면이 바뀌는 시각(초, 절대 시각)을 찾습니다.
+ * 초당 5장만 작게 줄여 비교하므로 1~2분 구간도 몇 초면 끝납니다.
+ */
+export async function detectCuts(input, from, len, headers = {}) {
+  const { stderr } = await run(
+    tools.ffmpeg,
+    [
+      "-hide_banner", "-nostats", "-loglevel", "info",
+      ...headerArgs(headers),
+      "-ss", String(from),
+      "-i", input,
+      "-t", String(len),
+      "-an", "-sn",
+      "-vf", `fps=5,scale=192:-2,select='gt(scene\\,${CUT_THRESHOLD})',showinfo`,
+      "-f", "null", "-",
+    ],
+    { timeout: 45000, maxBuffer: 16 * 1024 * 1024 },
+  );
+  const cuts = [...stderr.matchAll(/Parsed_showinfo.*?pts_time:\s*([\d.]+)/g)].map((m) => from + Number(m[1]));
+  return [...new Set(cuts.map((t) => Math.round(t * 10) / 10))].sort((a, b) => a - b);
+}
+
+const cutCache = new Map(); // "영상:시작:길이" → Promise<number[] | null>
+
+/**
+ * 영상의 [from, to] 구간에서 화면이 바뀌는 시각들. 실패하면 null (호출하는 쪽에서 예전 방식으로 대체)
+ * 360p 스트림을 써서 가볍게 처리합니다.
+ */
+export function findCuts(videoId, from, to) {
+  if (!framesAvailable()) return Promise.resolve(null);
+  const lo = Math.max(0, Math.floor(from));
+  const len = Math.max(1, Math.ceil(to) - lo);
+  const key = `${videoId}:${lo}:${len}`;
+  if (!cutCache.has(key)) {
+    const attempt = async (refresh) => {
+      const { url, headers, availableAt } = await getStreamInfo(videoId, { refresh, kind: "analysis" });
+      await waitAvailable(availableAt);
+      return detectCuts(url, lo, len, headers);
+    };
+    const job = limit(() => attempt(false).catch(() => attempt(true))).catch((err) => {
+      console.warn(`[화면 전환 감지 실패] ${videoId} ${lo}s+${len}s: ${String(err.stderr || err.message).trim().split("\n").pop()}`);
+      cutCache.delete(key);
+      return null;
+    });
+    cutCache.set(key, job);
+  }
+  return cutCache.get(key);
 }

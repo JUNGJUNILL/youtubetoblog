@@ -5,8 +5,9 @@ import { UserFacingError } from "../youtube.js";
 export const DEFAULT_MODEL = "gemini-3.8-flash";
 // 기본 모델의 무료 한도를 다 쓰거나 서버가 붐빌 때 자동으로 넘어갈 모델 (무료 한도가 더 넉넉함)
 export const DEFAULT_FALLBACK_MODEL = "gemini-3.5-flash-lite";
-// 영상 장면 고르기(이미지 보고 판단)용 모델: 무료 한도가 넉넉한 가벼운 모델
-export const DEFAULT_VISION_MODEL = "gemini-3.5-flash-lite";
+// 영상 장면 고르기(이미지 보고 판단)용 모델: 기본은 글 작성 모델과 같은 모델 (가벼운 모델은 이미지 판단이 부정확함)
+// 한도 초과·서버 혼잡이면 가벼운 모델로 자동으로 넘어감. GEMINI_VISION_MODEL 로 따로 지정 가능
+export const DEFAULT_VISION_FALLBACK_MODEL = "gemini-3.5-flash-lite";
 
 const BLOCKED_REASONS = new Set(["SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "RECITATION"]);
 
@@ -121,7 +122,7 @@ export async function generate({ system, user, onText, signal }) {
  * 후보 이미지들을 보고 장면별로 하나씩 고릅니다. (요청 한 번)
  * @param {{ instructions: string, schema: object, scenes: { text: string, images: { data: string, note?: string }[] }[], signal?: AbortSignal }} args
  *   images: 후보 이미지(base64 JPEG)와 설명 (영상 속 시각, 그 순간의 자막)
- * @returns {Promise<{ scenes: { scene: number, reason: string, pick: number, backup: number, relevant: boolean, caption: string }[] }>}
+ * @returns {Promise<{ scenes: { scene: number, reason: string, pick: number, backup: number, fit: number, caption: string }[] }>}
  */
 export async function chooseScenes({ instructions, schema, scenes, signal }) {
   const parts = [{ text: instructions }];
@@ -133,7 +134,7 @@ export async function chooseScenes({ instructions, schema, scenes, signal }) {
     });
   });
 
-  const models = [process.env.GEMINI_VISION_MODEL || DEFAULT_VISION_MODEL, ...getModels()].filter(
+  const models = [process.env.GEMINI_VISION_MODEL, ...getModels(), DEFAULT_VISION_FALLBACK_MODEL].filter(
     (m, i, all) => m && all.indexOf(m) === i,
   );
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
